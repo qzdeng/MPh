@@ -45,7 +45,9 @@ sys.path.insert(0, str(main))
 
 # Mock external dependencies so they are not required at build time.
 autodoc_mock_imports = ['jpype', 'numpy', 'winreg']
-for package in ('jpype', 'jpype.types', 'jpype.imports', 'numpy', 'winreg'):
+mocked_packages = ['jpype', 'jpype.types', 'jpype.imports', 'jpype.config',
+                   'numpy', 'winreg']
+for package in mocked_packages:
     sys.modules[package] = MagicMock()
 
 # Import package to make meta data available.

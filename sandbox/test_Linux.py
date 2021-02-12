@@ -33,20 +33,11 @@ the stand-alone client is concerned.
 
 import jpype
 import jpype.imports
+import jpype.config
 import os
-import atexit
 from pathlib import Path
 
-
-@atexit.register
-def shutdown():
-    """Force Java Virtual Machine to shut down at end of Python session."""
-    print('Exiting JVM.')
-    if jpype.isJVMStarted():
-        jpype.java.lang.Runtime.getRuntime().exit(0)
-
-
-print('Setting environment variables.')
+print('Setting up environment.')
 root = Path('/usr/local/comsol55/multiphysics')
 lib  = str(root/'lib'/'glnxa64')
 gcc  = str(root/'lib'/'glnxa64'/'gcc')
@@ -69,6 +60,7 @@ os.environ['LC_NUMERIC'] = os.environ['LC_ALL'] = 'C'
 
 print(f'Starting Comsol\'s Java VM via JPype {jpype.__version__}.')
 jvm = root/'java'/'glnxa64'/'jre'/'lib'/'amd64'/'server'/'libjvm.so'
+jpype.config.destroy_jvm = False
 jpype.startJVM(str(jvm), classpath=str(root/'plugins'/'*'))
 
 print('Inspecting environment from the Java side.')

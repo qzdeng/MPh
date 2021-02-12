@@ -16,12 +16,14 @@ and on macOS by 'maci64'.
 
 import jpype
 import jpype.imports
+import jpype.config
 from time import sleep
 from pathlib import Path
 
 print(f'Starting Comsol\'s Java VM via JPype {jpype.__version__}.')
 root = Path(r'C:\Program Files\COMSOL\COMSOL55\Multiphysics')
 jvm  = root/'java'/'win64'/'jre'/'bin'/'server'/'jvm.dll'
+jpype.config.destroy_jvm = False
 jpype.startJVM(str(jvm), classpath=str(root/'plugins'/'*'))
 
 print('Starting stand-alone Comsol client.')

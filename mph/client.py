@@ -13,12 +13,11 @@ from .model import Model               # model class
 # Dependencies                         #
 ########################################
 import jpype                           # Java bridge
-import jpype.imports                   # Java object imports
+import jpype.imports                   # Java imports
+import jpype.config                    # Java configuration
 import platform                        # platform information
 import atexit                          # exit handler
 import os                              # operating system
-import sys                             # system specifics
-import threading                       # multi-threading
 from pathlib import Path               # file-system paths
 from logging import getLogger          # event logging
 
@@ -138,12 +137,11 @@ class Client:
         # Start the Java virtual machine.
         logger.info(f'JPype version is {jpype.__version__}.')
         logger.info('Starting Java virtual machine.')
-        jpype.startJVM(str(backend['jvm']),
-                       classpath=str(root/'plugins'/'*'),
-                       convertStrings=False)
+        jpype.config.destroy_jvm = False
+        jpype.startJVM(str(backend['jvm']), classpath=str(root/'plugins'/'*'))
         logger.info('Java virtual machine has started.')
 
-        # Initialize a stand-alone client if no server port given.
+        # Initialize stand-alone client if no server port given.
         from com.comsol.model.util import ModelUtil as java
         if port is None:
             logger.info('Initializing stand-alone client.')
@@ -245,43 +243,6 @@ class Client:
 ########################################
 # Shutdown                             #
 ########################################
-
-
-def exit_hook(code=None):
-    """Monkey-patches `sys.exit()` to preserve exit code at shutdown."""
-    global exit_code
-    if isinstance(code, int):
-        exit_code = code
-    exit_function(code)
-
-
-def exception_hook_sys(exc_type, exc_value, exc_traceback):
-    """Sets exit code to 1 if exception raised in main thread."""
-    global exit_code
-    exit_code = 1
-    exception_handler_sys(exc_type, exc_value, exc_traceback)
-
-
-def exception_hook_threads(info):
-    """Sets exit code to 1 if exception raised in any other thread."""
-    global exit_code
-    exit_code = 1
-    exception_handler_threads(info)
-
-
-exit_code = 0
-exit_function = sys.exit
-sys.exit = exit_hook
-
-exception_handler_sys = sys.excepthook
-sys.excepthook = exception_hook_sys
-
-# Only available as of Python 3.8, see bugs.python.org/issue1230540.
-if hasattr(threading, 'excepthook'):
-    exception_handler_threads = threading.excepthook
-    threading.excepthook = exception_hook_threads
-
-
 @atexit.register
 def shutdown():
     """
@@ -292,9 +253,6 @@ def shutdown():
     from application code.
     """
     if jpype.isJVMStarted():
-        logger.info('Exiting the Java virtual machine.')
-        sys.stdout.flush()
-        sys.stderr.flush()
-        jpype.java.lang.Runtime.getRuntime().exit(exit_code)
-        # No code is reached after this due to the hard exit of the JVM.
-        logger.info('Java virtual machine has exited.')
+        logger.info('Shutting down the Java virtual machine.')
+        jpype.shutdownJVM()
+        logger.info('Java virtual machine has shut down.')
