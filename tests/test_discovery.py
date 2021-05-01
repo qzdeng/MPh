@@ -1,11 +1,11 @@
-﻿"""Tests discovering back-end installations."""
+﻿"""Tests the `discovery` module."""
 __license__ = 'MIT'
 
 
 ########################################
 # Dependencies                         #
 ########################################
-import parent
+import parent # noqa F401
 import mph
 import logging
 from sys import argv
@@ -37,9 +37,9 @@ def test_backend():
 if __name__ == '__main__':
 
     arguments = argv[1:]
-    if 'log' in arguments or 'debug' in arguments:
+    if 'log' in arguments:
         logging.basicConfig(
-            level   = logging.DEBUG,
+            level   = logging.DEBUG if 'debug' in arguments else logging.INFO,
             format  = '[%(asctime)s.%(msecs)03d] %(message)s',
             datefmt = '%H:%M:%S')
 

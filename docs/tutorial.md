@@ -1,10 +1,9 @@
-﻿Tutorial
---------
+﻿# Tutorial
 
 To follow along with this tutorial in an interactive Python session,
-if you wish to do so, make sure you have downloaded the [demonstration
-model "capacitor.mph"][demo] from this library's GitHub repository,
-and saved it in the same folder from which you run Python.
+if you wish to do so, make sure you have downloaded the demonstration
+model [`capacitor.mph`][capa] from MPh's source-code repository. Save
+it in the same folder from which you run Python.
 
 It is a model of a non-ideal, inhomogeneous, parallel-plate capacitor,
 in that its electrodes are of finite extent, the edges are rounded
@@ -13,31 +12,38 @@ different dielectric permittivity fill the separate halves of the
 electrode gap. Running the model only requires a license for the core
 Comsol platform, but not for any add-on module beyond that.
 
-![](images/capacitor.png)
+```{image} images/capacitor.png
+:alt: Screen-shot of demonstration model "capacitor" in Comsol GUI
+:align: center
+```
 
 
-### Starting Comsol
+## Starting Comsol
 
 In the beginning was the client. And the client was with Comsol. And
 the client was Comsol. So let there be a Comsol client.
 ```python
 >>> import mph
->>> client = mph.Client(cores=1)
+>>> client = mph.start(cores=1)
 ```
 
-It takes roughly ten seconds until the client is initialized. In this
-example, the Comsol back-end is instructed to use only one processor
-core. If the optional parameter is omitted, it will use all cores
-available on the machine. Restricting this resource is useful when
-running several simulations in parallel. Note, however, that due to
-[limitations](limitations) of this library's underlying Python-to-Java
-bridge, you cannot instantiate the [Client](api/mph.Client) class more
-than once. If you wish to accomplish that, in order to realize the full
-compute power of your simulation hardware, you need to start separate
-Python sessions, one for each client.
+The [`start()`](api/mph.start) function returns a client object, i.e.
+an instance of the [`Client`](api/mph.Client) class. It takes roughly
+ten seconds for the client to spin up.
+
+In this example, the Comsol back-end is instructed to use but one
+processor core. If the optional parameter is omitted, it will use all
+cores available on the machine. Restricting this resource is useful
+when running several simulations in parallel. Note, however, that due
+to [limitations](limitations) of the underlying Python-to-Java bridge,
+the `Client` class can only be instantiated once. Subsequent calls to
+`start()` will therefore raise an error. If you wish to work around
+this limitation, in order to realize the full parallelization potential
+of your simulation hardware, you will need to [run multiple Python
+processes](demonstrations.md#multiple-processes), one for each client.
 
 
-### Managing models
+## Managing models
 
 Now that we have the client up and running, we can tell it to load a
 model file.
@@ -45,7 +51,7 @@ model file.
 >>> model = client.load('capacitor.mph')
 ```
 
-It returns a `model` object, i.e. an instance of the
+It returns a model object, i.e. an instance of the
 [`Model`](api/mph.Model) class. We will learn what to do with it
 further down. For now, it was simply loaded into memory. We can
 list the names of all models the client currently manages.
@@ -59,7 +65,7 @@ the above simply displays the names of the models. The actual model
 objects can be recalled as follows:
 ```python
 >>> client.models()
-[<mph.model.Model object at 0x000002CAF6C0BE80>]
+[Model('capacitor')]
 ```
 
 We will generally not need to bother with these lists, as we would
@@ -77,20 +83,27 @@ Or we could remove all models at once — restart from a clean slate.
 ```
 
 
-### Inspecting models
+## Inspecting models
 
-Let's have a look at the parameters defined in the model.
+Let's have a look at the parameters defined in the model:
 ```python
->>> for parameter in model.parameters():
-...     print(parameter)
-...
-parameter(name='U', value='1[V]', description='applied voltage')
-parameter(name='d', value='2[mm]', description='electrode spacing')
-parameter(name='l', value='10[mm]', description='plate length')
-parameter(name='w', value='2[mm]', description='plate width')
+>>> model.parameters()
+{'U': '1[V]', 'd': '2[mm]', 'l': '10[mm]', 'w': '2[mm]'}
 ```
 
-Or the materials for that matter.
+With a little more typing, we can include the parameter descriptions:
+```python
+>>> for (name, value) in model.parameters().items():
+...     description = model.description(name)
+...     print(f'{description:20} {name} = {value}')
+...
+applied voltage      U = 1[V]
+electrode spacing    d = 2[mm]
+plate length         l = 10[mm]
+plate width          w = 2[mm]
+```
+
+Two custom materials are defined:
 ```python
 >>> model.materials()
 ['medium 1', 'medium 2']
@@ -129,7 +142,7 @@ may also set up different models to be automated by the same script.
 No problem, as long as your naming scheme is consistent throughout.
 
 
-### Modifying parameters
+## Modifying parameters
 
 As we have learned from the list above, the model defines a parameter
 named `d` that denotes the electrode spacing. If we know a parameter's
@@ -161,7 +174,7 @@ away.
 >>> model.build()
 ```
 
-### Running simulations
+## Running simulations
 
 To solve the model, we need to create a mesh. This would also be taken
 care of automatically, but let's make sure this critical step passes
@@ -192,31 +205,33 @@ studies at once, or rather, all of the studies defined in the model.
 ```
 
 
-### Evaluating results
+## Evaluating results
 
 Let's see what we found out and evaluate the electrostatic capacitance,
 i.e. at zero time or infinite frequency.
 ```python
 >>> model.evaluate('2*es.intWe/U^2', 'pF')
-array(1.31947349)
+array(1.31948342)
 ```
 
-All results are returned as NumPy arrays. Though scalars such as this
-one could be readily cast to a (regular Python) `float`.
+All results are returned as [NumPy arrays][array]. Though "global"
+evaluations such as this one could be readily cast to a regular Python
+[`float`][float].
 
-We could also ask where the electric field is strongest.
+We might also ask where the electric field is strongest and have
+[`evaluate()`](api/mph.Model) perform a "local" evaluation.
 ```python
 >>> (x, y, E) = model.evaluate(['x', 'y', 'es.normE'])
 >>> E.max()
-1455.5010798501924
+1480.2743893783063
 >>> imax = E.argmax()
 >>> x[imax], y[imax]
-(-0.0005161744830262844, 0.004178390490229011)
+(-0.000503768636204733, -0.004088126064370979)
 ```
 
 Note how this time we did not specify any units. When left out, values
-are returned in default units. Here specifically, the maximum field
-strength in V/m and its coordinates in meters.
+are returned in default units. Here specifically, the field strength
+in V/m and its coordinates in meters.
 
 We also did not specify the dataset, even though there are three
 different studies that have separate solutions and datasets associated
@@ -226,7 +241,7 @@ The default dataset is the one resulting from that study, here —
 inconsistently — named "electrostatic".
 ```python
 >>> model.datasets()
-['electrostatic', 'time-dependent', 'parametric sweep']
+['electrostatic', 'time-dependent', 'parametric sweep', 'sweep//solution']
 ```
 
 Now let's look at the time dependence. The two media in this model
@@ -238,12 +253,12 @@ time. We can tell that from its value at the first and last time step.
 ```python
 >>> C = '2*ec.intWe/U^2'
 >>> model.evaluate(C, 'pF', 'time-dependent', 'first')
-array(1.31947349)
+array(1.31948342)
 >>> model.evaluate(C, 'pF', 'time-dependent', 'last')
-array(1.48410629)
+array(1.48410283)
 ```
 
-The "first" and "last" time step defined in that study are 0 and 1
+The `'first'` and `'last'` time step defined in that study are 0 and 1
 second, respectively.
 ```python
 >>> (indices, values) = model.inner('time-dependent')
@@ -265,11 +280,11 @@ array([1, 2, 3], dtype=int32)
 >>> values
 array([1., 2., 3.]
 >>> model.evaluate(C, 'pF', 'parametric sweep', 'first', 1)
-array(1.31947349)
+array(1.31948342)
 >>> model.evaluate(C, 'pF', 'parametric sweep', 'first', 2)
-array(0.73678503)
+array(0.73678535)
 >>> model.evaluate(C, 'pF', 'parametric sweep', 'first', 3)
-array(0.52865545)
+array(0.52865775)
 ```
 
 Then again, with a scripting interface such as this one, we may as
@@ -277,13 +292,38 @@ well run the time-dependent study a number of times and change the
 parameter value from one run to the next. General parameter sweeps
 can get quite complicated in terms of how they map to indices as
 soon as combinations of parameters are allowed. Support for this may
-therefore be dropped in a future release — while the API is still
-considered unstable, which it is for as long as the version number
-of this library does not start with a 1 —, just to keep things simple
-and clean.
+therefore be limited.
 
 
-### Saving results
+## Exporting results
+
+Two exports are defined in the demonstration model:
+```python
+>>> model.exports()
+['data', 'image']
+```
+
+The first exports the solution of the electrostatic field as text data.
+The second renders an image of the plot featured in the screen-shot at
+the top of the page.
+
+We can trigger all exports at once by calling `model.export()`. Or we
+can be more selective and just export one: `model.export('image')`.
+The exported files will end up in the same folder as the model file
+itself and have the names that were assigned in the model's export
+nodes. Unless we supply custom file names or paths by adding them as
+the second argument.
+```python
+>>> model.export('image', 'static field.png')
+```
+
+The idea here is to first set up sensible exports in the GUI, such as
+images that illustrate the simulation results, and then trigger them
+from a script for a particular simulation run, the results of which
+may depend on parameter values.
+
+
+## Saving results
 
 To save the model we just solved, along with its solution, just do:
 ```python
@@ -304,7 +344,7 @@ The model was quick enough to solve, and we do like free disk space.
 We would just like to be able to look up modeling details somewhere
 down the line. Comsol also keeps track of the modeling history: a log
 of which features were created, deleted, modified, and in which order.
-Typically, such details are irrelevant. We can prune them by resetting
+Typically, these details are irrelevant. We can prune them by resetting
 that record.
 ```python
 >>> model.clear()
@@ -314,7 +354,10 @@ that record.
 
 Most functionality that the library offers is covered in this tutorial.
 The few things that were left out can be gleaned from the [API
-documentation](api).
+documentation](api). A number of use-case examples are showcased in
+chapter [Demonstrations](demonstrations).
 
 
-[demo]: https://github.com/John-Hennig/mph/blob/master/tests/capacitor.mph
+[capa]:  https://github.com/MPh-py/MPh/blob/main/demos/capacitor.mph
+[array]: https://numpy.org/doc/stable/reference/generated/numpy.array.html
+[float]: https://docs.python.org/3/library/functions.html#float

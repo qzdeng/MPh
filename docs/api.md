@@ -1,20 +1,22 @@
-API
----
+# API
 
-Code documentation of the application programming interface provided
-by this library.
+Code documentation of the public application programming interface
+provided by this library.
 
-```eval_rst
-
+```{eval-rst}
 .. currentmodule:: mph
 
 .. autosummary::
     :toctree: api
     :nosignatures:
 
-    Model
+    start
+    config
     Client
     Server
-    tools
+    Model
+    Node
+    tree
+    inspect
     discovery
 ```

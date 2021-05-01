@@ -7,6 +7,7 @@ __license__ = 'MIT'
 ########################################
 from . import discovery                # back-end discovery
 from .model import Model               # model class
+from .config import option             # configuration
 
 
 ########################################
@@ -16,16 +17,16 @@ import jpype                           # Java bridge
 import jpype.imports                   # Java imports
 import jpype.config                    # Java configuration
 import platform                        # platform information
-import atexit                          # exit handler
 import os                              # operating system
 from pathlib import Path               # file-system paths
 from logging import getLogger          # event logging
+import faulthandler                    # traceback dumps
 
 
 ########################################
 # Globals                              #
 ########################################
-logger = getLogger(__package__)        # package-wide event logger
+logger = getLogger(__package__)        # event logger
 
 
 ########################################
@@ -76,6 +77,10 @@ class Client:
     via the instance attribute `.java`.
     """
 
+    ####################################
+    # Internal                         #
+    ####################################
+
     def __init__(self, cores=None, version=None, port=None, host='localhost'):
 
         # Make sure this is the one and only client.
@@ -87,64 +92,32 @@ class Client:
         # Discover Comsol back-end.
         backend = discovery.backend(version)
 
-        # Set environment variables for loading external libraries.
-        system = platform.system()
-        root = backend['root']
-        if system == 'Windows':
-            var = 'PATH'
-            if var in os.environ:
-                path = os.environ[var].split(os.pathsep)
-            else:
-                path = []
-            lib = str(root/'lib'/'glnxa64')
-            if lib not in path:
-                os.environ[var] = os.pathsep.join([lib] + path)
-        elif system == 'Linux':
-            lib = str(root/'lib'/'glnxa64')
-            gcc = str(root/'lib'/'glnxa64'/'gcc')
-            ext = str(root/'ext'/'graphicsmagick'/'glnxa64')
-            cad = str(root/'ext'/'cadimport'/'glnxa64')
-            pre = str(root/'java'/'glnxa64'/'jre'/'lib'/'amd64'/'libjsig.so')
-            var = 'LD_LIBRARY_PATH'
-            if var in os.environ:
-                path = os.environ[var].split(os.pathsep)
-            else:
-                path = []
-            if lib not in path:
-                os.environ[var] = os.pathsep.join([lib, gcc, ext, cad] + path)
-            vars = ('MAGICK_CONFIGURE_PATH', 'MAGICK_CODER_MODULE_PATH',
-                    'MAGICK_FILTER_MODULE_PATH')
-            for var in vars:
-                os.environ[var] = ext
-            os.environ['LD_PRELOAD'] = pre
-            os.environ['LC_NUMERIC'] = os.environ['LC_ALL'] = 'C'
-        elif system == 'Darwin':
-            var = 'DYLD_LIBRARY_PATH'
-            if var in os.environ:
-                path = os.environ[var].split(os.pathsep)
-            else:
-                path = []
-            lib = str(root/'lib'/'maci64')
-            ext = str(root/'ext'/'graphicsmagick'/'maci64')
-            cad = str(root/'ext'/'cadimport'/'maci64')
-            if lib not in path:
-                os.environ[var] = os.pathsep.join([lib, ext, cad] + path)
-
         # Instruct Comsol to limit number of processor cores to use.
         if cores:
             os.environ['COMSOL_NUM_THREADS'] = str(cores)
 
+        # On Windows, turn off fault handlers if enabled.
+        # Without this, pyTest will crash when starting the Java VM.
+        # See "Errors reported by Python fault handler" in JPype docs.
+        # The problem may be the SIGSEGV signal, see JPype issue #886.
+        if platform.system() == 'Windows' and faulthandler.is_enabled():
+            logger.debug('Turning off Python fault handlers.')
+            faulthandler.disable()
+
         # Start the Java virtual machine.
-        logger.info(f'JPype version is {jpype.__version__}.')
+        logger.debug(f'JPype version is {jpype.__version__}.')
         logger.info('Starting Java virtual machine.')
         jpype.config.destroy_jvm = False
-        jpype.startJVM(str(backend['jvm']), classpath=str(root/'plugins'/'*'))
+        jpype.startJVM(str(backend['jvm']),
+                       classpath=str(backend['root']/'plugins'/'*'),
+                       convertStrings=False)
         logger.info('Java virtual machine has started.')
 
-        # Initialize stand-alone client if no server port given.
+        # Initialize a stand-alone client if no server port given.
         from com.comsol.model.util import ModelUtil as java
         if port is None:
             logger.info('Initializing stand-alone client.')
+            check_environment(backend)
             graphics = True
             java.initStandalone(graphics)
             logger.info('Stand-alone client initialized.')
@@ -166,10 +139,7 @@ class Client:
         java.setPreference('updates.update.check', 'off')
         java.setPreference('tempfiles.saving.warnifoverwriteolder', 'off')
         java.setPreference('tempfiles.recovery.autosave', 'off')
-        try:
-            java.setPreference('tempfiles.recovery.checkforrecoveries', 'off')
-        except Exception:
-            logger.warning('Could not turn off check for recovery files.')
+        java.setPreference('tempfiles.recovery.checkforrecoveries', 'off')
         java.setPreference('tempfiles.saving.optimize', 'filesize')
 
         # Save useful information in instance attributes.
@@ -179,45 +149,119 @@ class Client:
         self.port    = port
         self.java    = java
 
+    def __repr__(self):
+        connection = f'port={self.port}' if self.port else 'stand-alone'
+        return f"{self.__class__.__name__}({connection})"
+
+    def __contains__(self, item):
+        if isinstance(item, str):
+            if item in self.names():
+                return True
+        elif isinstance(item, Model):
+            if item in self.models():
+                return True
+        return False
+
+    def __iter__(self):
+        yield from self.models()
+
+    def __truediv__(self, name):
+        if isinstance(name, str):
+            for model in self:
+                if name == model.name():
+                    return model
+            else:
+                error = f'Model "{name}" has not been loaded by client.'
+                logger.error(error)
+                raise ValueError(error)
+        return NotImplemented
+
+    ####################################
+    # Inspection                       #
+    ####################################
+
+    def models(self):
+        """Returns all models currently held in memory."""
+        return [Model(self.java.model(tag)) for tag in self.java.tags()]
+
+    def names(self):
+        """Returns the names of all loaded models."""
+        return [model.name() for model in self.models()]
+
+    def files(self):
+        """Returns the file-system paths of all loaded models."""
+        return [model.file() for model in self.models()]
+
+    ####################################
+    # Interaction                      #
+    ####################################
+
     def load(self, file):
-        """Returns the model loaded from the given `file`."""
-        file = Path(file)
+        """Loads a model from the given `file` and returns it."""
+        file = Path(file).resolve()
+        if self.caching() and file in self.files():
+            logger.info(f'Retrieving "{file.name}" from cache.')
+            return self.models()[self.files().index(file)]
         tag = self.java.uniquetag('model')
         logger.info(f'Loading model "{file.name}".')
         model = Model(self.java.load(tag, str(file)))
         logger.info('Finished loading model.')
         return model
 
-    def create(self, name):
+    def caching(self, state=None):
         """
-        Creates and returns a new, empty model with the given `name`.
+        Enables or disables caching of previously loaded models.
 
-        This is not particularly useful unless you are prepared to
-        drop down to the Java layer and add model features on your
-        own. It may help to call the returned (Python) model object
-        something like `pymodel` and assign the name `model` to
-        `pymodel.java`. Then you can just copy-and-paste Java or
-        Matlab code from the Comsol programming manual or as exported
-        from the Comsol front-end. Python will gracefully overlook
-        gratuitous semicolons at the end of statements, so this
-        approach would even work for entire blocks of code.
+        Caching means that the `load()` method will check if a model
+        has been previously loaded from the same file-system path and,
+        if so, return the in-memory model object instead of reloading
+        it from disk. By default (at start-up) caching is disabled.
+
+        Pass `True` to enable caching, `False` to disable it. If no
+        argument is passed, the current state is returned.
+        """
+        if state is None:
+            return option('caching')
+        elif state in (True, False):
+            option('caching', state)
+        else:
+            error = 'Caching state can only be set to either True or False.'
+            logger.error(error)
+            raise ValueError(error)
+
+    def create(self, name=None):
+        """
+        Creates a new model and returns it as a `Model` instance.
+
+        An optional `name` can be supplied. Otherwise the model will
+        retain its automatically generated name, like "Model 1".
         """
         java = self.java.createUnique('model')
-        logger.debug(f'Created model with tag "{java.tag()}".')
         model = Model(java)
-        model.rename(name)
+        if name:
+            model.rename(name)
+        else:
+            name = model.name()
+        logger.debug(f'Created model "{name}" with tag "{java.tag()}".')
         return model
-
-    def models(self):
-        """Returns all model objects currently held in memory."""
-        return [Model(self.java.model(tag)) for tag in self.java.tags()]
-
-    def names(self):
-        """Names all models that are currently held in memory."""
-        return [model.name() for model in self.models()]
 
     def remove(self, model):
         """Removes the given `model` from memory."""
+        if isinstance(model, str):
+            if model not in self.names():
+                error = f'No model named "{model}" exists.'
+                logger.error(error)
+                raise ValueError(error)
+            model = self[model]
+        elif isinstance(model, Model):
+            if model not in self.models():
+                error = f'Model "{model}" does not exist.'
+                logger.error(error)
+                raise ValueError(error)
+        else:
+            error = 'Model must either be a model name or Model instance.'
+            logger.error(error)
+            raise TypeError(error)
         name = model.name()
         tag  = model.java.tag()
         logger.debug(f'Removing model "{name}" with tag "{tag}".')
@@ -230,29 +274,70 @@ class Client:
 
     def disconnect(self):
         """Disconnects the client from the server."""
-        if self.port is not None:
+        if self.port:
             self.java.disconnect()
             self.host = None
             self.port = None
         else:
-            error = 'A stand-alone client cannot disconnect from a server.'
+            error = 'The client is not connected to a server.'
             logger.error(error)
             raise RuntimeError(error)
 
 
 ########################################
-# Shutdown                             #
+# Environment                          #
 ########################################
-@atexit.register
-def shutdown():
-    """
-    Shuts down the Java virtual machine when the Python session ends.
 
-    This function is not part of the public API. It runs automatically
-    at the end of the Python session and should not be called directly
-    from application code.
-    """
-    if jpype.isJVMStarted():
-        logger.info('Shutting down the Java virtual machine.')
-        jpype.shutdownJVM()
-        logger.info('Java virtual machine has shut down.')
+def check_environment(backend):
+    """Checks the process environment required for a stand-alone client."""
+    system = platform.system()
+    root = backend['root']
+    help = 'Refer to chapter "Limitations" in the documentation for help.'
+    if system == 'Windows':
+        pass
+    elif system == 'Linux':
+        var = 'LD_LIBRARY_PATH'
+        if var not in os.environ:
+            error = f'Library search path {var} not set in environment.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        path = os.environ[var].split(os.pathsep)
+        lib = root/'lib'/'glnxa64'
+        if str(lib) not in path:
+            error = f'Folder "{lib}" missing in library search path.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        gcc = root/'lib'/'glnxa64'/'gcc'
+        if gcc.exists() and str(gcc) not in path:
+            logger.warning(f'Folder "{gcc}" missing in library search path.')
+        gra = str(root/'ext'/'graphicsmagick'/'glnxa64')
+        if str(gra) not in path:
+            error = f'Folder "{gra}" missing in library search path.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        cad = root/'ext'/'cadimport'/'glnxa64'
+        if cad.exists() and str(cad) not in path:
+            logger.warning(f'Folder "{cad}" missing in library search path.')
+    elif system == 'Darwin':
+        var = 'DYLD_LIBRARY_PATH'
+        if var not in os.environ:
+            error = f'Library search path {var} not set in environment.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        if var in os.environ:
+            path = os.environ[var].split(os.pathsep)
+        else:
+            path = []
+        lib = root/'lib'/'maci64'
+        if str(lib) not in path:
+            error = f'Folder "{lib}" missing in library search path.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        gra = root/'ext'/'graphicsmagick'/'maci64'
+        if str(gra) not in path:
+            error = f'Folder "{gra}" missing in library search path.'
+            logger.error(error)
+            raise RuntimeError(error + '\n' + help)
+        cad = root/'ext'/'cadimport'/'maci64'
+        if cad.exists() and str(cad) not in path:
+            logger.warning(f'Folder "{cad}" missing in library search path.')
