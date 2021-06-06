@@ -6,6 +6,7 @@ __license__ = 'MIT'
 # Components                           #
 ########################################
 from . import discovery                # back-end discovery
+from .config import option             # configuration
 
 
 ########################################
@@ -16,7 +17,6 @@ from subprocess import PIPE            # I/O redirection
 from subprocess import TimeoutExpired  # communication time-out
 from re import match as regex          # regular expression
 from time import perf_counter as now   # wall-clock time
-from time import sleep                 # execution delay
 from sys import version_info           # Python version
 from logging import getLogger          # event logging
 
@@ -76,6 +76,8 @@ class Server:
         server  = backend['server']
         logger.info('Starting external server process.')
         arguments = ['-login', 'auto', '-graphics']
+        if option('classkit'):
+            arguments += ['-ckl']
         if cores:
             arguments += ['-np', str(cores)]
             noun = 'core' if cores == 1 else 'cores'
@@ -149,15 +151,5 @@ class Server:
             logger.info(f'Server on port {self.port} has stopped.')
         except TimeoutExpired:
             logger.warning('Server did not shut down within time-out period.')
-            logger.info('Forcefully terminating external server process.')
+            logger.info('Trying to forcefully terminate server process.')
             self.process.kill()
-            t0 = now()
-            while self.running():
-                if not self.running():
-                    break
-                if now() - t0 > timeout:
-                    error = 'Forceful shutdown failed within time-out period.'
-                    logger.error(error)
-                    raise TimeoutError(error) from None
-                sleep(0.1)
-            logger.info('Server process has been forcefully terminated.')

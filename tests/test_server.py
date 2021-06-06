@@ -7,6 +7,7 @@ __license__ = 'MIT'
 ########################################
 import parent # noqa F401
 import mph
+from fixtures import logging_disabled
 import logging
 from sys import argv
 
@@ -15,10 +16,6 @@ from sys import argv
 # Fixtures                             #
 ########################################
 server = None
-
-
-def setup_module():
-    pass
 
 
 def teardown_module():
@@ -50,6 +47,8 @@ def test_running():
 def test_stop():
     server.stop()
     assert not server.running()
+    with logging_disabled():
+        server.stop()
 
 
 ########################################
@@ -65,7 +64,6 @@ if __name__ == '__main__':
             format  = '[%(asctime)s.%(msecs)03d] %(message)s',
             datefmt = '%H:%M:%S')
 
-    setup_module()
     try:
         test_init()
         test_repr()

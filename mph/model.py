@@ -13,7 +13,6 @@ from .node import Node                 # model node
 ########################################
 from numpy import array, ndarray       # numerical array
 from numpy import integer              # NumPy integer
-from jpype import JInt                 # Java integer
 from pathlib import Path               # file-system path
 from re import match                   # pattern matching
 from warnings import warn              # user warning
@@ -294,17 +293,20 @@ class Model:
                 logger.error(error)
                 raise TypeError(error)
         if not dataset.exists():
-            error = f'Dataset {dataset.name()} does not exist.'
+            error = f'Dataset "{dataset.name()}" does not exist.'
             logger.error(error)
             raise ValueError(error)
 
         # Find corresponding solution.
-        tag = dataset.property('solution')
+        if 'solution' in dataset.properties():
+            tag = dataset.property('solution')
+        elif 'data' in dataset.properties():
+            tag = dataset.property('data')
         for solution in self/'solutions':
             if solution.tag() == tag:
                 break
         else:
-            error = f'Dataset {dataset.name()} does not refer to a solution.'
+            error = f'Dataset "{dataset.name()}" does not refer to a solution.'
             logger.error(error)
             raise RuntimeError(error)
 
@@ -336,17 +338,20 @@ class Model:
                 logger.error(error)
                 raise TypeError(error)
         if not dataset.exists():
-            error = f'Dataset {dataset.name()} does not exist.'
+            error = f'Dataset "{dataset.name()}" does not exist.'
             logger.error(error)
             raise ValueError(error)
 
         # Find corresponding solution.
-        tag = dataset.property('solution')
+        if 'solution' in dataset.properties():
+            tag = dataset.property('solution')
+        elif 'data' in dataset.properties():
+            tag = dataset.property('data')
         for solution in self/'solutions':
             if solution.tag() == tag:
                 break
         else:
-            error = f'Dataset {dataset.name()} does not refer to a solution.'
+            error = f'Dataset "{dataset.name()}" does not refer to a solution.'
             logger.error(error)
             raise RuntimeError(error)
 
@@ -411,12 +416,11 @@ class Model:
 
         # Find the default dataset if nothing specified.
         if not dataset:
-            etag = self.java.result().numerical().uniquetag('eval')
-            eval = self.java.result().numerical().create(etag, 'Eval')
-            dtag = str(eval.getString('data'))
-            self.java.result().numerical().remove(etag)
+            eval = (self/'evaluations').create('Eval')
+            tag  = eval.property('data')
+            eval.remove()
             for dataset in self/'datasets':
-                if dataset.tag() == dtag:
+                if dataset.tag() == tag:
                     break
             else:
                 error = 'Could not determine default dataset.'
@@ -431,7 +435,10 @@ class Model:
                     f'on dataset "{dataset.name()}".')
 
         # Find corresponding solution.
-        tag = dataset.property('solution')
+        if 'solution' in dataset.properties():
+            tag = dataset.property('solution')
+        elif 'data' in dataset.properties():
+            tag = dataset.property('data')
         for solution in self/'solutions':
             if solution.tag() == tag:
                 break
@@ -447,22 +454,21 @@ class Model:
             raise RuntimeError(error)
 
         # Try to perform a global evaluation, which may fail.
-        etag = self.java.result().numerical().uniquetag('eval')
-        eval = self.java.result().numerical().create(etag, 'Global')
-        eval.set('expr', expression)
-        if unit is not None:
-            eval.set('unit', unit)
-        if dataset is not None:
-            eval.set('data', dataset.tag())
+        eval = (self/'evaluations').create('Global')
+        eval.property('expr', expression)
+        if unit:
+            eval.property('unit', unit)
+        eval.property('data', dataset)
         if outer is not None:
-            eval.set('outersolnum', JInt(outer))
+            eval.property('outersolnum', outer)
         try:
             logger.debug('Trying global evaluation.')
-            results = array(eval.getData())
-            if eval.isComplex():
+            java = eval.java
+            results = array(java.getData())
+            if java.isComplex():
                 results = results.astype('complex')
-                results += 1j * array(eval.getImagData())
-            self.java.result().numerical().remove(etag)
+                results += 1j * array(java.getImagData())
+            eval.remove()
             logger.info('Finished global evaluation.')
             if inner is None:
                 pass
@@ -471,68 +477,62 @@ class Model:
             elif inner == 'last':
                 results = results[:, -1, :]
             else:
-                results = results[:, inner, :]
+                if isinstance(inner, list):
+                    inner = array(inner)
+                results = results[:, inner-1, :]
             return results.squeeze()
         # Move on if this fails. Seems to not be a global expression then.
         except Exception:
             logger.debug('Global evaluation failed. Moving on.')
 
-        # For particle datasets, create an EvalPoint node.
-        etag = self.java.result().numerical().uniquetag('eval')
+        # For particle datasets, create an "EvalPoint" feature.
         if dataset.type() == 'Particle':
-            eval = self.java.result().numerical().create(etag, 'EvalPoint')
-            if inner is not None:
-                if inner in ('first', 'last'):
-                    eval.set('innerinput', inner)
-                else:
-                    eval.set('innerinput', 'manual')
-                    eval.set('solnum', [JInt(index) for index in inner])
-        # Otherwise create an Eval node.
+            eval = (self/'evaluations').create('EvalPoint')
+            if inner in ('first', 'last'):
+                eval.property('innerinput', inner)
+            elif inner is not None:
+                eval.property('innerinput', 'manual')
+                eval.property('solnum', inner)
+        # Otherwise create an "Eval" feature.
         else:
-            eval = self.java.result().numerical().create(etag, 'Eval')
+            eval = (self/'evaluations').create('Eval')
 
-        # Select the dataset, if specified.
-        if dataset is not None:
-            eval.set('data', dataset.tag())
-
-        # Set the expression(s) to be evaluated.
-        eval.set('expr', expression)
-
-        # Set the unit(s), if specified.
-        if unit is not None:
-            eval.set('unit', unit)
-
-        # Select an outer solution, i.e. parameter index, if specified.
+        # Set up the evaluation feature.
+        eval.property('expr', expression)
+        if unit:
+            eval.property('unit', unit)
+        eval.property('data', dataset)
         if outer is not None:
-            eval.set('outersolnum', JInt(outer))
+            eval.property('outersolnum', outer)
 
         # Retrieve the data.
         logger.info('Retrieving data.')
+        java = eval.java
         if dataset.type() == 'Particle':
-            results = array(eval.getReal())
-            if eval.isComplex():
+            results = array(java.getReal())
+            if java.isComplex():
                 results = results.astype('complex')
-                results += 1j * array(eval.getImag())
+                results += 1j * array(java.getImag())
             if isinstance(expression, (tuple, list)):
                 shape = results.shape[1:]
                 results = results.reshape(len(expression), -1, *shape)
         else:
-            results = array(eval.getData())
-            if eval.isComplex():
+            results = array(java.getData())
+            if java.isComplex():
                 results = results.astype('complex')
-                results += 1j * array(eval.getImagData())
-            if inner is None:
-                pass
-            elif inner == 'first':
+                results += 1j * array(java.getImagData())
+            if inner == 'first':
                 results = results[:, 0, :]
             elif inner == 'last':
                 results = results[:, -1, :]
-            else:
-                results = results[:, inner, :]
+            elif inner is not None:
+                if isinstance(inner, list):
+                    inner = array(inner)
+                results = results[:, inner-1, :]
         logger.info('Finished retrieving data.')
 
-        # Remove the temporary evaluation node we added to the model.
-        self.java.result().numerical().remove(etag)
+        # Remove the temporary evaluation feature we added to the model.
+        eval.remove()
 
         # Squeeze out singleton array dimensions.
         if isinstance(expression, (list, tuple)):
@@ -580,12 +580,17 @@ class Model:
             if value:
                 value = f'{value} [{unit}]'
         if description is not None:
-            warn('Argument "description" to Model.parameter() is deprecated.'
+            warn('Argument "description" to Model.parameter() is deprecated. '
                  'Call .description() instead.')
             self.description(name, description)
         if value is None:
             if not evaluate:
-                return str(self.java.param().get(name))
+                try:
+                    return str(self.java.param().get(name))
+                except Exception:
+                    error = f'Parameter "{name}" is not defined.'
+                    logger.error(error)
+                    raise ValueError(error) from None
             else:
                 try:
                     return self.java.param().evaluate(name)
@@ -595,8 +600,8 @@ class Model:
                         return complex(value[0], value[1])
                     except Exception:
                         error = f'Evaluation of parameter "{name}" failed.'
-                        logger.exception(error)
-                        raise RuntimeError(error)
+                        logger.error(error)
+                        raise RuntimeError(error) from None
         else:
             if isinstance(value, complex):
                 value = str(value)
@@ -625,7 +630,7 @@ class Model:
             return {str(name): str(self.java.param().get(name))
                     for name in self.java.param().varnames()}
         else:
-            return {str(name): str(self.java.param().evaluate(name))
+            return {str(name): self.java.param().evaluate(name)
                     for name in self.java.param().varnames()}
 
     def description(self, name, text=None):
@@ -808,11 +813,20 @@ class Model:
 
         # Use model name if no file name specified.
         if path is None:
+            file = self.file()
             if format == 'Comsol':
-                logger.info(f'Saving model "{self.name()}".')
-                self.java.save()
+                if file.is_file():
+                    logger.info(f'Saving model "{self}".')
+                    self.java.save()
+                elif file.is_dir():
+                    file = file/f'{self}.{type}'
+                    logger.info(f'Saving model as "{file.name}".')
+                    self.java.save(str(file))
             else:
-                file = f'{self}.{type}'
+                if file.is_file():
+                    file = file.with_suffix(f'.{type}')
+                elif file.is_dir():
+                    file = file/f'{self}.{type}'
                 logger.info(f'Saving model as "{file.name}".')
                 self.java.save(str(file), type)
         # Otherwise save at given path.

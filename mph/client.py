@@ -108,7 +108,11 @@ class Client:
         logger.debug(f'JPype version is {jpype.__version__}.')
         logger.info('Starting Java virtual machine.')
         jpype.config.destroy_jvm = False
-        jpype.startJVM(str(backend['jvm']),
+        java_args = [str(backend['jvm'])]
+        if option('classkit'):
+            java_args += ['-Dcs.ckl']
+        logger.debug(f'JVM arguments: {java_args}')
+        jpype.startJVM(*java_args,
                        classpath=str(backend['root']/'plugins'/'*'),
                        convertStrings=False)
         logger.info('Java virtual machine has started.')
@@ -139,7 +143,11 @@ class Client:
         java.setPreference('updates.update.check', 'off')
         java.setPreference('tempfiles.saving.warnifoverwriteolder', 'off')
         java.setPreference('tempfiles.recovery.autosave', 'off')
-        java.setPreference('tempfiles.recovery.checkforrecoveries', 'off')
+        try:
+            # Preference not defined on certain systems, see issue #39.
+            java.setPreference('tempfiles.recovery.checkforrecoveries', 'off')
+        except Exception:
+            logger.debug('Could not turn off check for recovery files.')
         java.setPreference('tempfiles.saving.optimize', 'filesize')
 
         # Save useful information in instance attributes.
@@ -252,10 +260,16 @@ class Client:
                 error = f'No model named "{model}" exists.'
                 logger.error(error)
                 raise ValueError(error)
-            model = self[model]
+            model = self/model
         elif isinstance(model, Model):
+            try:
+                model.java.tag()
+            except Exception:
+                error = 'Model does not exist.'
+                logger.error(error)
+                raise ValueError(error)
             if model not in self.models():
-                error = f'Model "{model}" does not exist.'
+                error = 'Model does not exist.'
                 logger.error(error)
                 raise ValueError(error)
         else:

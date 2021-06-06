@@ -155,7 +155,7 @@ results = multiprocessing.Queue()
 Then we can start a number of workers, say four:
 ```python
 for _ in range(4):
-    process = multiprocessing.Process(target=worker, args=(jobs, results)
+    process = multiprocessing.Process(target=worker, args=(jobs, results))
     process.start()
 ```
 
@@ -281,11 +281,10 @@ The advantage of using Python over Java is:
   don't need to bother with compiling Java source code to Java classes
   via `comsolcompile`.
 * You can use Python introspection to understand how Comsol models
-  are "created in code". This may be the most productive feature. The
-  Comsol documentation explains a lot of things, but not every little
-  detail. The function [`mph.inspect()`](api/mph.inspect) makes
-  introspection even easier, as it formats the output more nicely than
-  Python's built-in [`dir()`][dir].
+  are "created in code". The Comsol documentation explains a lot of
+  things, but not every little detail. Either use Python's built-in
+  [`dir()`][dir] or call [`mph.inspect()`](api/mph.inspect) to see a
+  pretty-fied representation of a Java object in the model tree.
 
 To save the model created in the above example, we do:
 ```python
@@ -314,7 +313,7 @@ model.build('Geometry 1')
 ```
 
 This, again, hides all tags in application code. Instead, we refer to
-the nodes in the model tree by name. In the example, these names were
+nodes in the model tree by name. In the example, these names were
 generated automatically, in the same way the Comsol GUI does it. We
 could also supply names of our choice.
 ```python
@@ -350,7 +349,31 @@ block.property('size', ('0.1', '0.2', '0.5'))
 model.build(geometry)
 ```
 
-The latter two code examples produce the following model tree:
+The division operator is the Swiss army knife for accessing nodes in
+the model tree. It even works with `client` as root. With the above
+example, the following notations
+```python
+client/'block of ice'/'geometries'/'geometry'/'ice block'
+model/'geometries'/'geometry'/'ice block'
+geometries/'geometry'/'ice block'
+geometry/'ice block'
+block
+```
+
+all refer to the same geometry element in the model. We could also
+include the forward slash in a string expression instead of using it as
+an operator, just like we did in the first and second example.
+```python
+model/'geometries/geometry/ice block'
+```
+
+The model's root node not can be referenced with either `model/''` or
+`model/None`. If any of the node names in the hierarchy contain a
+forward slash themselves, that forward slash can be escaped/masked by
+doubling it, for instance: `geometry/'ice//frozen water'`.
+
+The example model discussed here produces the following model
+[tree](api/mph.tree):
 ```python
 >>> mph.tree(model)
 block of ice
@@ -369,6 +392,7 @@ block of ice
 ├─ coordinates
 │  └─ Boundary System 1
 ├─ variables
+├─ couplings
 ├─ physics
 ├─ multiphysics
 ├─ materials
